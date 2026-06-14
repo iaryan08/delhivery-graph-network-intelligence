@@ -26,7 +26,7 @@ selected = option_menu(
         "container": {
             "padding": "0!important", 
             "background-color": "#0e1117", 
-            "border-bottom": "1px solid rgba(255,255,255,0.1)",
+            "border-bottom": "none",
             "margin": "0px",
             "border-radius": "0px"
         },
