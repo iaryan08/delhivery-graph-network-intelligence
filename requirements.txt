@@ -9,3 +9,5 @@ plotly
 streamlit
 
 pytest
+
+streamlit-option-menu
