@@ -12,10 +12,12 @@ st.markdown("Monitor real-time delay risks, explore bottleneck hubs, compare mod
 
 @st.cache_data
 def load_data():
-    edges_df = pd.read_csv("../data/processed/graph_edges.csv")
-    nodes_df = pd.read_csv("../data/processed/graph_nodes.csv")
-    metrics_df = pd.read_csv("../data/processed/node_metrics.csv")
-    ftl_df = pd.read_csv("../data/processed/ftl_carting_framework.csv")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_dir, '..', 'data', 'processed')
+    edges_df = pd.read_csv(os.path.join(data_dir, "graph_edges.csv"))
+    nodes_df = pd.read_csv(os.path.join(data_dir, "graph_nodes.csv"))
+    metrics_df = pd.read_csv(os.path.join(data_dir, "node_metrics.csv"))
+    ftl_df = pd.read_csv(os.path.join(data_dir, "ftl_carting_framework.csv"))
     return edges_df, nodes_df, metrics_df, ftl_df
 
 try:
