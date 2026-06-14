@@ -1,0 +1,19 @@
+# Local data and datasets (large files)
+data/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE and System files
+.vscode/
+.idea/
+desktop.ini
+.DS_Store
