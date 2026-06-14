@@ -3,12 +3,67 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import networkx as nx
+import pickle
+import numpy as np
 import os
 
 st.set_page_config(layout="wide", page_title="Delhivery Graph Network", page_icon=":material/hub:")
 
+from streamlit_option_menu import option_menu
+
 st.title(":blue[:material/local_shipping: Delhivery Network Intelligence Dashboard]")
 st.markdown("Monitor real-time delay risks, explore bottleneck hubs, compare model performance, and analyze corridor profiles using the graph-based framework.")
+
+# ─── Top Navbar ────────────────────────────────────────────────────────────
+selected = option_menu(
+    menu_title=None,
+    options=["Executive Dashboard", "Network Auditor", "ETA Predictor", "Route Optimizer"],
+    icons=["bar-chart-fill", "search", "cpu", "truck"],
+    menu_icon="cast",
+    default_index=0,
+    orientation="horizontal",
+    styles={
+        "container": {
+            "padding": "0!important", 
+            "background-color": "#0e1117", 
+            "border-bottom": "1px solid rgba(255,255,255,0.1)",
+            "margin": "0px",
+            "border-radius": "0px"
+        },
+        "icon": {"color": "#ff4b4b", "font-size": "18px"},
+        "nav-link": {"font-size": "15px", "text-align": "center", "margin":"0px", "--hover-color": "#262730", "border-radius": "0px"},
+        "nav-link-selected": {
+            "background-color": "transparent", 
+            "border-bottom": "3px solid #ff4b4b",
+            "color": "#ff4b4b",
+            "font-weight": "bold"
+        },
+    }
+)
+
+# Inject CSS to make the option menu sticky at the top
+st.markdown("""
+    <style>
+        /* Give Streamlit header a solid background to prevent transparent scrolling issues */
+        header[data-testid="stHeader"] {
+            background-color: #0e1117 !important;
+        }
+
+        /* Target the div containing the option_menu iframe using :has to make it sticky */
+        div[data-testid="stVerticalBlock"] > div:has(iframe[title="streamlit_option_menu.option_menu"]) {
+            position: sticky;
+            top: 3.75rem; /* Stick exactly below the Streamlit native header */
+            z-index: 999;
+            background-color: #0e1117;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        /* Reduce the top padding so content is flush */
+        .block-container {
+            padding-top: 3.5rem;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 @st.cache_data
 def load_data():
@@ -18,13 +73,28 @@ def load_data():
     nodes_df = pd.read_csv(os.path.join(data_dir, "graph_nodes.csv"))
     metrics_df = pd.read_csv(os.path.join(data_dir, "node_metrics.csv"))
     ftl_df = pd.read_csv(os.path.join(data_dir, "ftl_carting_framework.csv"))
-    return edges_df, nodes_df, metrics_df, ftl_df
+    node_features = pd.read_csv(os.path.join(data_dir, "node_features.csv"))
+    return edges_df, nodes_df, metrics_df, ftl_df, node_features
+
+@st.cache_resource
+def load_model():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(base_dir, '..', 'data', 'processed', 'eta_model.pkl')
+    meta_path = os.path.join(base_dir, '..', 'data', 'processed', 'feature_metadata.pkl')
+    if os.path.exists(model_path) and os.path.exists(meta_path):
+        with open(model_path, "rb") as f:
+            model = pickle.load(f)
+        with open(meta_path, "rb") as f:
+            meta = pickle.load(f)
+        return model, meta
+    return None, None
 
 try:
-    edges_df, nodes_df, metrics_df, ftl_df = load_data()
+    edges_df, nodes_df, metrics_df, ftl_df, node_features = load_data()
+    model, meta = load_model()
 
-    # ─── Sidebar Filters ───────────────────────────────────────────────────────
-    st.sidebar.title("Filters")
+    # ─── Global Filters ────────────────────────────────────────────────────────
+    st.sidebar.title("🎛️ Global Filters")
     route_type = st.sidebar.selectbox("Route Type", ["All", "FTL", "Carting"])
     time_of_day = st.sidebar.selectbox("Time of Day", ["All", "Morning", "Afternoon", "Evening", "Night"])
 
@@ -34,27 +104,25 @@ try:
     if time_of_day != "All":
         filtered_edges = filtered_edges[filtered_edges['time_of_day'] == time_of_day]
 
-    # ─── Section 1: Network Overview ──────────────────────────────────────────
-    st.markdown("---")
-    st.subheader(f":blue[:material/router: Network Overview ({len(filtered_edges)} corridors)]")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Corridors", len(filtered_edges))
-    with col2:
-        avg_delay = filtered_edges['median_segment_factor'].mean()
-        st.metric("Avg Delay Factor", f"{avg_delay:.2f}x")
-    with col3:
-        breach_pct = (filtered_edges['median_segment_factor'] > 1.2).mean() * 100
-        st.metric("Corridors Breaching SLA", f"{breach_pct:.1f}%")
 
-    # ─── Section 2: Top Bottleneck Hubs ───────────────────────────────────────
-    st.markdown("---")
-    st.subheader(":red[:material/warning: Top Bottleneck Hubs (SLA Breach Risk)]")
+    # ─── View 1: Executive Dashboard ───────────────────────────────────────────
+    if selected == "Executive Dashboard":
+        st.subheader(f":blue[:material/router: Network Overview ({len(filtered_edges)} corridors)]")
 
-    col_left, col_right = st.columns([1, 1])
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Corridors", len(filtered_edges))
+        with col2:
+            avg_delay = filtered_edges['median_segment_factor'].mean()
+            st.metric("Avg Delay Factor", f"{avg_delay:.2f}x")
+        with col3:
+            breach_pct = (filtered_edges['median_segment_factor'] > 1.2).mean() * 100
+            st.metric("Corridors Breaching SLA", f"{breach_pct:.1f}%")
 
-    with col_left:
+        st.markdown("---")
+        st.subheader(":red[:material/warning: Top Bottleneck Hubs (SLA Breach Risk)]")
+
         top_hubs = (
             metrics_df[['node_name', 'betweenness_centrality', 'delayed_trips', 'sla_breach_score']]
             .sort_values('sla_breach_score', ascending=False)
@@ -75,7 +143,8 @@ try:
             use_container_width=True
         )
 
-    with col_right:
+        st.markdown("<br>", unsafe_allow_html=True)
+        
         fig_bar = px.bar(
             top_hubs.head(5).sort_values('sla_breach_score'),
             x='sla_breach_score', y='node_name', orientation='h',
@@ -86,144 +155,277 @@ try:
         fig_bar.update_layout(template="plotly_white", showlegend=False, coloraxis_showscale=False)
         st.plotly_chart(fig_bar, use_container_width=True)
 
-    # ─── Section 2.5: Interactive Network Topology ───────────────────────────
-    st.markdown("---")
-    st.subheader(":violet[:material/hub: Interactive Network Topology]")
-    st.markdown("Visualizing the top 150 most critical corridors by SLA breach risk.")
-    
-    # We build a subgraph to keep the visualization responsive in Streamlit
-    risk_edges = filtered_edges[filtered_edges['median_segment_factor'] > 1.2].sort_values('trip_count', ascending=False).head(150)
-    
-    if len(risk_edges) > 0:
-        G_vis = nx.from_pandas_edgelist(risk_edges, 'source_center', 'destination_center', ['median_segment_factor', 'trip_count'])
-        pos = nx.spring_layout(G_vis, seed=42)
+        st.markdown("---")
+        st.subheader(":violet[:material/hub: Interactive Network Topology]")
+        st.markdown("Visualizing the top 150 most critical corridors by SLA breach risk.")
         
-        edge_x = []
-        edge_y = []
-        for edge in G_vis.edges():
-            x0, y0 = pos[edge[0]]
-            x1, y1 = pos[edge[1]]
-            edge_x.extend([x0, x1, None])
-            edge_y.extend([y0, y1, None])
-            
-        edge_trace = go.Scatter(
-            x=edge_x, y=edge_y,
-            line=dict(width=0.5, color='#888'),
-            hoverinfo='none',
-            mode='lines')
-            
-        node_x = []
-        node_y = []
-        node_text = []
-        node_size = []
-        node_color = []
+        risk_edges = filtered_edges[filtered_edges['median_segment_factor'] > 1.2].sort_values('trip_count', ascending=False).head(150)
         
-        # Build node metadata lookup
-        node_meta = metrics_df.set_index('node_id')
-        
-        for node in G_vis.nodes():
-            x, y = pos[node]
-            node_x.append(x)
-            node_y.append(y)
+        if len(risk_edges) > 0:
+            G_vis = nx.from_pandas_edgelist(risk_edges, 'source_center', 'destination_center', ['median_segment_factor', 'trip_count'])
+            pos = nx.spring_layout(G_vis, seed=42)
             
-            try:
-                score = node_meta.loc[node, 'sla_breach_score']
-                name = node_meta.loc[node, 'node_name']
-            except KeyError:
-                score = 0
-                name = str(node)
+            edge_x = []
+            edge_y = []
+            for edge in G_vis.edges():
+                x0, y0 = pos[edge[0]]
+                x1, y1 = pos[edge[1]]
+                edge_x.extend([x0, x1, None])
+                edge_y.extend([y0, y1, None])
                 
-            node_text.append(f"{name}<br>SLA Score: {score:.1f}")
-            node_size.append(10 + min(score / 200, 40) if score > 0 else 10)  # scale node size safely
-            node_color.append(score)
-            
-        node_trace = go.Scatter(
-            x=node_x, y=node_y,
-            mode='markers',
-            hoverinfo='text',
-            text=node_text,
-            marker=dict(
-                showscale=True,
-                colorscale='Reds',
-                reversescale=False,
-                color=node_color,
-                size=node_size,
-                colorbar=dict(title='SLA Risk'),
-                line_width=2))
+            edge_trace = go.Scatter(
+                x=edge_x, y=edge_y,
+                line=dict(width=0.5, color='#888'),
+                hoverinfo='none',
+                mode='lines')
                 
-        fig_net = go.Figure(data=[edge_trace, node_trace],
-                     layout=go.Layout(
-                        showlegend=False,
-                        hovermode='closest',
-                        margin=dict(b=0,l=0,r=0,t=0),
-                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
-                        )
-        st.plotly_chart(fig_net, use_container_width=True)
-    else:
-        st.info("No breached corridors found for the selected filters to visualize.")
+            node_x = []
+            node_y = []
+            node_text = []
+            node_size = []
+            node_color = []
+            
+            node_meta = metrics_df.set_index('node_id')
+            
+            for node in G_vis.nodes():
+                x, y = pos[node]
+                node_x.append(x)
+                node_y.append(y)
+                
+                try:
+                    score = node_meta.loc[node, 'sla_breach_score']
+                    name = node_meta.loc[node, 'node_name']
+                except KeyError:
+                    score = 0
+                    name = str(node)
+                    
+                node_text.append(f"{name}<br>SLA Score: {score:.1f}")
+                node_size.append(10 + min(score / 200, 40) if score > 0 else 10)
+                node_color.append(score)
+                
+            node_trace = go.Scatter(
+                x=node_x, y=node_y,
+                mode='markers',
+                hoverinfo='text',
+                text=node_text,
+                marker=dict(
+                    showscale=True,
+                    colorscale='Reds',
+                    reversescale=False,
+                    color=node_color,
+                    size=node_size,
+                    colorbar=dict(title='SLA Risk'),
+                    line_width=2))
+                    
+            fig_net = go.Figure(data=[edge_trace, node_trace],
+                         layout=go.Layout(
+                            showlegend=False,
+                            hovermode='closest',
+                            margin=dict(b=0,l=0,r=0,t=0),
+                            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                            )
+            st.plotly_chart(fig_net, use_container_width=True)
+        else:
+            st.info("No breached corridors found for the selected filters to visualize.")
 
-    # ─── Section 3: Corridor Delay Heatmap ────────────────────────────────────
-    st.markdown("---")
-    st.subheader(":orange[:material/bar_chart: Corridor Delay Distribution]")
+    # ─── View 2: Network Auditor ───────────────────────────────────────────────
+    elif selected == "Network Auditor":
+        st.subheader(":orange[:material/search: Hub Facility Inspector]")
+        st.markdown("Drill down into specific facility metrics and audit outgoing corridor latency.")
+        
+        hub_list = metrics_df.sort_values('betweenness_centrality', ascending=False)
+        selected_hub_name = st.selectbox("Select Hub Facility to Inspect", hub_list['node_name'].tolist())
+        selected_hub_row = hub_list[hub_list['node_name'] == selected_hub_name].iloc[0]
+        selected_hub_id = selected_hub_row['node_id']
 
-    if len(filtered_edges) > 0:
-        fig_hist = px.histogram(
-            filtered_edges,
-            x='median_segment_factor', nbins=50,
-            title="Distribution of Corridor Delay Factors",
-            labels={'median_segment_factor': 'Median Segment Delay Factor'},
-            color_discrete_sequence=['#FF6B6B']
+        col_h1, col_h2, col_h3, col_h4 = st.columns(4)
+        col_h1.metric("Betweenness Centrality", f"{selected_hub_row['betweenness_centrality']:.4f}")
+        col_h2.metric("In-Degree (Connections)", int(selected_hub_row['in_degree']))
+        col_h3.metric("Out-Degree (Connections)", int(selected_hub_row['out_degree']))
+        col_h4.metric("SLA Breach Score", f"{selected_hub_row['sla_breach_score']:.1f}")
+
+        st.markdown("---")
+        st.subheader(f"🚛 Outgoing Corridors from {selected_hub_name}")
+        
+        hub_edges = edges_df[edges_df['source_center'] == selected_hub_id].copy()
+        
+        if len(hub_edges) > 0:
+            hub_edges['SLA Status'] = hub_edges['median_segment_factor'].apply(lambda x: '⚠️ Breached' if x > 1.2 else '✅ Compliant')
+            st.dataframe(
+                hub_edges[['destination_name', 'route_type', 'time_of_day', 'median_segment_factor', 'median_segment_actual_time', 'median_segment_osrm_time', 'SLA Status']]
+                .sort_values('median_segment_factor', ascending=False),
+                column_config={
+                    "destination_name": st.column_config.TextColumn("Destination Facility Hub"),
+                    "route_type": st.column_config.TextColumn("Route Mode"),
+                    "time_of_day": st.column_config.TextColumn("Dispatch Window"),
+                    "median_segment_factor": st.column_config.NumberColumn("Median Delay Factor", format="%.2fx"),
+                    "median_segment_actual_time": st.column_config.NumberColumn("Actual Time (m)"),
+                    "median_segment_osrm_time": st.column_config.NumberColumn("OSRM Est. Time (m)"),
+                    "SLA Status": st.column_config.TextColumn("SLA Status")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+        else:
+            st.info("No outgoing corridors found for the selected facility.")
+            
+        st.markdown("---")
+        st.subheader(":orange[:material/bar_chart: Corridor Delay Distribution]")
+
+        if len(filtered_edges) > 0:
+            fig_hist = px.histogram(
+                filtered_edges,
+                x='median_segment_factor', nbins=50,
+                title="Distribution of Corridor Delay Factors",
+                labels={'median_segment_factor': 'Median Segment Delay Factor'},
+                color_discrete_sequence=['#FF6B6B']
+            )
+            fig_hist.add_vline(x=1.2, line_dash="dash", line_color="red",
+                               annotation_text="SLA Breach Threshold (>1.2x)")
+            fig_hist.update_layout(bargap=0.1, template="plotly_white")
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+    # ─── View 3: ETA Predictor ────────────────────────────────────────────────
+    elif selected == "ETA Predictor":
+        st.subheader(":green[:material/model_training: Interactive ETA Predictor (ML)]")
+        st.markdown("Estimate shipping actual duration using real-time node embeddings and graph features.")
+
+        if model is None:
+            st.error("ML Model files (`eta_model.pkl`) not found. Please verify the modeling phase completed.")
+        else:
+            st.markdown("### 📝 Enter Shipment Specifications")
+            
+            col_in1, col_in2 = st.columns(2)
+            
+            with col_in1:
+                hubs_sorted = metrics_df.sort_values('node_name')
+                source_facility_name = st.selectbox("Origin Facility Hub ", hubs_sorted['node_name'].tolist())
+                source_facility_row = hubs_sorted[hubs_sorted['node_name'] == source_facility_name].iloc[0]
+                source_id = source_facility_row['node_id']
+                
+                route_type_input = st.selectbox("Route Transport Mode", ["FTL", "Carting"])
+                hour_of_day_input = st.slider("Dispatch Hour of Day", 0, 23, 12)
+                
+            with col_in2:
+                osrm_distance = st.number_input("OSRM Estimated Distance (km)", min_value=1.0, max_value=2500.0, value=120.0)
+                osrm_time = st.number_input("OSRM Standard Transit Time (minutes)", min_value=1.0, max_value=3000.0, value=100.0)
+                
+            st.markdown("---")
+            if st.button("🔮 Calculate Predicted Transit Time & Analyze Risk", type="primary"):
+                node_feats_row = node_features[node_features['node_id'] == source_id]
+                
+                if len(node_feats_row) > 0:
+                    node_row = node_feats_row.iloc[0]
+                    
+                    route_type_encoded = 1 if route_type_input == "FTL" else 0
+                    x_base = [osrm_time, osrm_distance, hour_of_day_input, route_type_encoded]
+                    
+                    graph_cols = ['betweenness_centrality', 'in_degree', 'out_degree', 'clustering_coefficient']
+                    x_centrality = [node_row[col] for col in graph_cols]
+                    
+                    x_emb = [node_row[f'emb_{i}'] for i in range(16)]
+                    
+                    X = np.array([x_base + x_centrality + x_emb])
+                    
+                    predicted_time = model.predict(X)[0]
+                    predicted_delay_factor = predicted_time / osrm_time
+                    
+                    st.markdown("### 📊 Predictive Intelligence Report")
+                    
+                    col_res1, col_res2, col_res3 = st.columns(3)
+                    
+                    with col_res1:
+                        st.metric("Predicted Actual Time", f"{predicted_time:.1f} mins", 
+                                  delta=f"{predicted_time - osrm_time:+.1f} mins vs OSRM", delta_color="inverse")
+                    with col_res2:
+                        st.metric("Predicted Delay Factor", f"{predicted_delay_factor:.2fx}")
+                    with col_res3:
+                        sla_status = "⚠️ SLA BREACH RISK (High)" if predicted_delay_factor > 1.2 else "✅ COMPLIANT"
+                        st.metric("Predicted SLA Status", sla_status, 
+                                  delta="Breach if delay > 1.2x" if predicted_delay_factor > 1.2 else "Safe", 
+                                  delta_color="normal" if predicted_delay_factor <= 1.2 else "inverse")
+                        
+                    st.info(f"**Diagnostic Output**: Origin facility **{source_facility_name}** has a Betweenness Centrality of **{node_row['betweenness_centrality']:.4f}**. The Graph-Enhanced LightGBM model adjusted the raw OSRM time of **{osrm_time:.1f} mins** to a realistic actual projection of **{predicted_time:.1f} mins**.")
+                else:
+                    st.error("Selected origin facility features not found in precomputed embeddings.")
+
+            st.markdown("---")
+            st.subheader("🤖 ETA Model Performance Comparison")
+            st.markdown("Graph-enhanced model vs. Baseline LightGBM — trained on 144,846 cleaned trips.")
+
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("Baseline MAE", "54.58 mins")
+            col_m2.metric("Graph-Enhanced MAE", "43.25 mins", delta="-11.33 mins", delta_color="normal")
+            col_m3.metric("Baseline Accuracy@15%", "43.56%")
+            col_m4.metric("Graph-Enhanced Accuracy@15%", "50.98%", delta="+7.42%", delta_color="normal")
+
+            fig_model = go.Figure()
+            fig_model.add_trace(go.Bar(name='Baseline LightGBM', x=['MAE (mins)', 'Accuracy@15% (%)'],
+                                        y=[54.58, 43.56], marker_color='#74B9FF'))
+            fig_model.add_trace(go.Bar(name='Graph-Enhanced LightGBM', x=['MAE (mins)', 'Accuracy@15% (%)'],
+                                        y=[43.25, 50.98], marker_color='#00B894'))
+            fig_model.update_layout(barmode='group', title="Baseline vs Graph-Enhanced Model Metrics",
+                                     template="plotly_white", yaxis_title="Score")
+            st.plotly_chart(fig_model, use_container_width=True)
+
+    # ─── View 4: Route Optimizer ──────────────────────────────────────────────
+    elif selected == "Route Optimizer":
+        st.subheader(":blue[:material/local_shipping: FTL vs. Carting Strategy Framework]")
+        st.markdown("Data-driven corridor profile matrix quantifying time-cost trade-offs by distance and time of day.")
+
+        strategy_df = edges_df.copy()
+        strategy_df['dist_bucket'] = pd.qcut(strategy_df['median_segment_osrm_distance'], q=3, labels=['Short', 'Medium', 'Long'])
+        strategy_grouped = strategy_df.groupby(['dist_bucket', 'time_of_day', 'route_type']).agg(
+            avg_delay_factor=('median_segment_factor', 'mean')
+        ).reset_index()
+
+        fig_strat = px.bar(
+            strategy_grouped,
+            x='time_of_day', y='avg_delay_factor', color='route_type', barmode='group',
+            facet_col='dist_bucket',
+            title="Average Delay Factor: FTL vs. Carting by Distance and Time of Day",
+            labels={'avg_delay_factor': 'Avg Delay Factor', 'time_of_day': 'Time of Day', 'route_type': 'Route Type'},
+            color_discrete_map={'FTL': '#0984E3', 'Carting': '#E17055'}
         )
-        fig_hist.add_vline(x=1.2, line_dash="dash", line_color="red",
-                           annotation_text="SLA Breach Threshold (>1.2x)")
-        fig_hist.update_layout(bargap=0.1, template="plotly_white")
-        st.plotly_chart(fig_hist, use_container_width=True)
+        fig_strat.add_hline(y=1.2, line_dash="dot", line_color="red",
+                             annotation_text="SLA Threshold")
+        fig_strat.update_layout(template="plotly_white")
+        st.plotly_chart(fig_strat, use_container_width=True)
 
-    # ─── Section 4: Model Performance Comparison ──────────────────────────────
-    st.markdown("---")
-    st.subheader(":green[:material/model_training: ETA Model Performance Comparison]")
-    st.markdown("Graph-enhanced model vs. Baseline LightGBM — trained on 144,846 cleaned trips.")
-
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("Baseline MAE", "54.58 mins")
-    col_m2.metric("Graph-Enhanced MAE", "43.25 mins", delta="-11.33 mins", delta_color="normal")
-    col_m3.metric("Baseline Accuracy@15%", "43.56%")
-    col_m4.metric("Graph-Enhanced Accuracy@15%", "50.98%", delta="+7.42%", delta_color="normal")
-
-    fig_model = go.Figure()
-    fig_model.add_trace(go.Bar(name='Baseline LightGBM', x=['MAE (mins)', 'Accuracy@15% (%)'],
-                                y=[54.58, 43.56], marker_color='#74B9FF'))
-    fig_model.add_trace(go.Bar(name='Graph-Enhanced LightGBM', x=['MAE (mins)', 'Accuracy@15% (%)'],
-                                y=[43.25, 50.98], marker_color='#00B894'))
-    fig_model.update_layout(barmode='group', title="Baseline vs Graph-Enhanced Model Metrics",
-                             template="plotly_white", yaxis_title="Score")
-    st.plotly_chart(fig_model, use_container_width=True)
-
-    # ─── Section 5: FTL vs Carting Strategy Framework ─────────────────────────
-    st.markdown("---")
-    st.subheader(":blue[:material/local_shipping: FTL vs. Carting Strategy Framework]")
-    st.markdown("Data-driven corridor profile matrix quantifying time-cost trade-offs by distance and time of day.")
-
-    # Reload raw edges for this section (unaffected by sidebar filter)
-    strategy_df = edges_df.copy()
-    strategy_df['dist_bucket'] = pd.qcut(strategy_df['median_segment_osrm_distance'], q=3, labels=['Short', 'Medium', 'Long'])
-    strategy_grouped = strategy_df.groupby(['dist_bucket', 'time_of_day', 'route_type']).agg(
-        avg_delay_factor=('median_segment_factor', 'mean')
-    ).reset_index()
-
-    fig_strat = px.bar(
-        strategy_grouped,
-        x='time_of_day', y='avg_delay_factor', color='route_type', barmode='group',
-        facet_col='dist_bucket',
-        title="Average Delay Factor: FTL vs. Carting by Distance and Time of Day",
-        labels={'avg_delay_factor': 'Avg Delay Factor', 'time_of_day': 'Time of Day', 'route_type': 'Route Type'},
-        color_discrete_map={'FTL': '#0984E3', 'Carting': '#E17055'}
-    )
-    fig_strat.add_hline(y=1.2, line_dash="dot", line_color="red",
-                         annotation_text="SLA Threshold")
-    fig_strat.update_layout(template="plotly_white")
-    st.plotly_chart(fig_strat, use_container_width=True)
+        st.markdown("---")
+        st.subheader("💡 Mode Selection Playbook")
+        
+        col_play1, col_play2 = st.columns(2)
+        with col_play1:
+            play_dist = st.selectbox("Corridor Distance Classification", ["Short (< 50km)", "Medium (50km - 150km)", "Long (> 150km)"])
+            play_time = st.selectbox("Dispatch Time of Day ", ["Morning", "Afternoon", "Evening", "Night"])
+            
+        with col_play2:
+            st.markdown("#### Network Optimization Recommendation")
+            rec_mode = "Carting"
+            rec_reason = "Efficient and cost-effective for short distances."
+            
+            if "Long" in play_dist:
+                rec_mode = "FTL"
+                rec_reason = "Carting exhibits high instability on long routes during PM slots. Mandating FTL secures SLA compliance."
+            elif "Medium" in play_dist:
+                if play_time in ["Evening", "Morning"]:
+                    rec_mode = "FTL"
+                    rec_reason = "During peak transit slots, FTL maintains a significantly lower delay factor compared to Carting."
+                else:
+                    rec_mode = "Carting"
+                    rec_reason = "During off-peak daylight hours, Carting delay factors are within 4% of FTL, saving unit mode cost."
+            else:
+                if play_time == "Evening":
+                    rec_mode = "FTL"
+                    rec_reason = "Evening congestion at local sorting hubs causes Carting bottlenecks. Switch to FTL to bypass hub delays."
+                else:
+                    rec_mode = "Carting"
+                    rec_reason = "Carting operates well within SLA thresholds during off-peak windows on short corridors."
+                    
+            st.success(f"**Recommended Mode**: {rec_mode}")
+            st.info(f"**Reasoning**: {rec_reason}")
 
 except FileNotFoundError as e:
     st.error(f"Processed data not found ({e}). Please run the data pipeline and graph analysis scripts first.")
