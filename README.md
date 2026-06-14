@@ -110,7 +110,7 @@ Ensure you have Python 3.10 or higher installed. Clone the repository and instal
 
 ```bash
 # Clone the repository
-git clone https://github.com/<your-username>/delhivery-graph-network-intelligence.git
+git clone https://github.com/iaryan08/delhivery-graph-network-intelligence.git
 cd delhivery-graph-network-intelligence
 
 # Install dependencies

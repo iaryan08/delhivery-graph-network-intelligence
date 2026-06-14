@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import networkx as nx
 import os
 
-st.set_page_config(layout="wide", page_title="Delhivery Graph Network", page_icon="🚚")
+st.set_page_config(layout="wide", page_title="Delhivery Graph Network", page_icon=":material/hub:")
 
-st.title("🚚 Delhivery Network Intelligence Dashboard")
+st.title(":blue[:material/local_shipping: Delhivery Network Intelligence Dashboard]")
 st.markdown("Monitor real-time delay risks, explore bottleneck hubs, compare model performance, and analyze corridor profiles using the graph-based framework.")
 
 @st.cache_data
@@ -33,7 +34,7 @@ try:
 
     # ─── Section 1: Network Overview ──────────────────────────────────────────
     st.markdown("---")
-    st.subheader(f"📡 Network Overview ({len(filtered_edges)} corridors)")
+    st.subheader(f":blue[:material/router: Network Overview ({len(filtered_edges)} corridors)]")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -47,7 +48,7 @@ try:
 
     # ─── Section 2: Top Bottleneck Hubs ───────────────────────────────────────
     st.markdown("---")
-    st.subheader("🔴 Top Bottleneck Hubs (SLA Breach Risk)")
+    st.subheader(":red[:material/warning: Top Bottleneck Hubs (SLA Breach Risk)]")
 
     col_left, col_right = st.columns([1, 1])
 
@@ -83,9 +84,86 @@ try:
         fig_bar.update_layout(template="plotly_white", showlegend=False, coloraxis_showscale=False)
         st.plotly_chart(fig_bar, use_container_width=True)
 
+    # ─── Section 2.5: Interactive Network Topology ───────────────────────────
+    st.markdown("---")
+    st.subheader(":violet[:material/hub: Interactive Network Topology]")
+    st.markdown("Visualizing the top 150 most critical corridors by SLA breach risk.")
+    
+    # We build a subgraph to keep the visualization responsive in Streamlit
+    risk_edges = filtered_edges[filtered_edges['median_segment_factor'] > 1.2].sort_values('trip_count', ascending=False).head(150)
+    
+    if len(risk_edges) > 0:
+        G_vis = nx.from_pandas_edgelist(risk_edges, 'source_center', 'destination_center', ['median_segment_factor', 'trip_count'])
+        pos = nx.spring_layout(G_vis, seed=42)
+        
+        edge_x = []
+        edge_y = []
+        for edge in G_vis.edges():
+            x0, y0 = pos[edge[0]]
+            x1, y1 = pos[edge[1]]
+            edge_x.extend([x0, x1, None])
+            edge_y.extend([y0, y1, None])
+            
+        edge_trace = go.Scatter(
+            x=edge_x, y=edge_y,
+            line=dict(width=0.5, color='#888'),
+            hoverinfo='none',
+            mode='lines')
+            
+        node_x = []
+        node_y = []
+        node_text = []
+        node_size = []
+        node_color = []
+        
+        # Build node metadata lookup
+        node_meta = metrics_df.set_index('node_id')
+        
+        for node in G_vis.nodes():
+            x, y = pos[node]
+            node_x.append(x)
+            node_y.append(y)
+            
+            try:
+                score = node_meta.loc[node, 'sla_breach_score']
+                name = node_meta.loc[node, 'node_name']
+            except KeyError:
+                score = 0
+                name = str(node)
+                
+            node_text.append(f"{name}<br>SLA Score: {score:.1f}")
+            node_size.append(10 + min(score / 200, 40) if score > 0 else 10)  # scale node size safely
+            node_color.append(score)
+            
+        node_trace = go.Scatter(
+            x=node_x, y=node_y,
+            mode='markers',
+            hoverinfo='text',
+            text=node_text,
+            marker=dict(
+                showscale=True,
+                colorscale='Reds',
+                reversescale=False,
+                color=node_color,
+                size=node_size,
+                colorbar=dict(title='SLA Risk'),
+                line_width=2))
+                
+        fig_net = go.Figure(data=[edge_trace, node_trace],
+                     layout=go.Layout(
+                        showlegend=False,
+                        hovermode='closest',
+                        margin=dict(b=0,l=0,r=0,t=0),
+                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                        )
+        st.plotly_chart(fig_net, use_container_width=True)
+    else:
+        st.info("No breached corridors found for the selected filters to visualize.")
+
     # ─── Section 3: Corridor Delay Heatmap ────────────────────────────────────
     st.markdown("---")
-    st.subheader("📊 Corridor Delay Distribution")
+    st.subheader(":orange[:material/bar_chart: Corridor Delay Distribution]")
 
     if len(filtered_edges) > 0:
         fig_hist = px.histogram(
@@ -102,7 +180,7 @@ try:
 
     # ─── Section 4: Model Performance Comparison ──────────────────────────────
     st.markdown("---")
-    st.subheader("🤖 ETA Model Performance Comparison")
+    st.subheader(":green[:material/model_training: ETA Model Performance Comparison]")
     st.markdown("Graph-enhanced model vs. Baseline LightGBM — trained on 144,846 cleaned trips.")
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
@@ -122,7 +200,7 @@ try:
 
     # ─── Section 5: FTL vs Carting Strategy Framework ─────────────────────────
     st.markdown("---")
-    st.subheader("🚛 FTL vs. Carting Strategy Framework")
+    st.subheader(":blue[:material/local_shipping: FTL vs. Carting Strategy Framework]")
     st.markdown("Data-driven corridor profile matrix quantifying time-cost trade-offs by distance and time of day.")
 
     # Reload raw edges for this section (unaffected by sidebar filter)
